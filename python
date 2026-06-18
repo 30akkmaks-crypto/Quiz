@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""
+quiz_forge.py - Викторина (Квиз) на Python (CLI + Tkinter GUI)
+Поддерживает: категории, таймер, таблицу рекордов, экспорт.
+"""
+import argparse
+import sys
+import json
+import os
+import random
+import time
+import csv
+from datetime import datetime
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, asdict, field
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox, scrolledtext
+    GUI_AVAILABLE = True
+except ImportError:
+    GUI_AVAILABLE = False
+
+QUESTIONS_FILE = "questions.json"
+SCORES_FILE = "scores.json"
+
+@dataclass
+class Question:
+    question: str
+    options: List[str]
+    correct: int          # индекс правильного ответа (0-based)
+    category: str
+    difficulty: str       # easy, medium, hard
+
+@dataclass
+class Score:
+    player: str
+    score: int
+    correct: int
+    total: int
+    date: str
+    category: str
+
+class QuizForge:
+    def __init__(self, q_file=QUESTIONS_FILE, s_file=SCORES_FILE):
+        self.q_file = q_file
+        self.s_file = s_file
+        self.questions: List[Question] = []
+        self.scores: List[Score] = []
+        self.load_questions()
+        self.load_scores()
+
+    def load_questions(self):
+        if os.path.exists(self.q_file):
+            try:
+                with open(self.q_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.questions = [Question(**q) for q in data]
+                    return
+            except:
+                pass
+        self.questions = self._default_questions()
+        self.save_questions()
+
+    def save_questions(self):
+        with open(self.q_file, 'w', encoding='utf-8') as f:
+            json.dump([asdict(q) for q in self.questions], f, indent=2, ensure_ascii=False)
+
+    def load_scores(self):
+        if os.path.exists(self.s_file):
+            try:
+                with open(self.s_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.scores = [Score(**s) for s in data]
+            except:
+                self.scores = []
+        else:
+            self.scores = []
+
+    def save_scores(self):
+        with open(self.s_file, 'w', encoding='utf-8') as f:
+            json.dump([asdict(s) for s in self.scores], f, indent=2, ensure_ascii=False)
+
+    def _default_questions(self) -> List[Question]:
+        return [
+            Question("Столица Франции?", ["Лондон", "Париж", "Берлин", "Мадрид"], 1, "geography", "easy"),
+            Question("Сколько планет в Солнечной системе?", ["7", "8", "9", "10"], 1, "science", "easy"),
+            Question("Кто написал 'Войну и мир'?", ["Достоевский", "Толстой", "Чехов", "Пушкин"], 1, "literature", "medium"),
+            Question("Год первого полёта человека в космос?", ["1957", "1961", "1969", "1975"], 1, "history", "hard"),
+            Question("Самый большой океан на Земле?", ["Атлантический", "Индийский", "Тихий", "Северный Ледовитый"], 2, "geography", "medium"),
+            Question("Какой элемент имеет химический символ 'O'?", ["Кислород", "Озон", "Осмий", "Олово"], 0, "science", "easy"),
+            Question("Сколько цветов в радуге?", ["5", "6", "7", "8"], 2, "science", "easy"),
+            Question("Кто был первым президентом США?", ["Вашингтон", "Линкольн", "Джефферсон", "Адамс"], 0, "history", "medium"),
+            Question("Самая высокая гора в мире?", ["Килиманджаро", "Эверест", "Мак-Кинли", "Эльбрус"], 1, "geography", "easy"),
+            Question("Год основания Рима?", ["753 до н.э.", "476 н.э.", "1492", "1776"], 0, "history", "hard"),
+            Question("Самый большой материк?", ["Африка", "Евразия", "Северная Америка", "Антарктида"], 1, "geography", "easy"),
+            Question("Сколько костей в теле взрослого человека?", ["206", "208", "210", "212"], 0, "science", "hard"),
+            Question("Кто написал 'Гамлета'?", ["Шекспир", "Байрон", "Диккенс", "Гёте"], 0, "literature", "medium"),
+            Question("Где находится статуя Свободы?", ["Вашингтон", "Нью-Йорк", "Бостон", "Филадельфия"], 1, "geography", "medium"),
+            Question("Сколько лет длилась Столетняя война?", ["100", "116", "120", "150"], 1, "history", "hard"),
+        ]
+
+    def get_categories(self) -> List[str]:
+        return sorted(set(q.category for q in self.questions))
+
+    def get_questions(self, category: str = None, count: int = None) -> List[Question]:
+        filtered = self.questions
+        if category:
+            filtered = [q for q in filtered if q.category == category]
+        if count and count < len(filtered):
+            return random.sample(filtered, count)
+        return filtered
+
+    def run_quiz(self, category: str = None, count: int = 10, timer: int = None) -> Tuple[int, int]:
+        questions = self.get_questions(category, count)
+        if not questions:
+            print("❌ Нет вопросов в выбранной категории")
+            return 0, 0
+        correct = 0
+        random.shuffle(questions)
+        print(f"\n🎯 Начинаем викторину! Вопросов: {len(questions)}\n")
+        for i, q in enumerate(questions, 1):
+            print(f"Вопрос {i}/{len(questions)} [{q.category}] ({q.difficulty}):")
+            print(f"  {q.question}")
+            for j, opt in enumerate(q.options):
+                print(f"  {j+1}. {opt}")
+            start_time = time.time()
+            if timer:
+                print(f"⏱️ У вас {timer} секунд!")
+            while True:
+                try:
+                    answer = input("Ваш ответ (1-4): ").strip()
+                    if not answer:
+                        continue
+                    ans = int(answer) - 1
+                    if 0 <= ans < len(q.options):
+                        break
+                    print("Пожалуйста, введите число от 1 до 4")
+                except ValueError:
+                    print("Введите число")
+            elapsed = time.time() - start_time
+            if timer and elapsed > timer:
+                print(f"⏰ Время вышло! Правильный ответ: {q.options[q.correct]}")
+            elif ans == q.correct:
+                print("✅ Правильно!")
+                correct += 1
+            else:
+                print(f"❌ Неправильно! Правильный ответ: {q.options[q.correct]}")
+            print()
+        print(f"🎯 Результат: {correct}/{len(questions)}")
+        return correct, len(questions)
+
+    def add_score(self, player: str, score: int, correct: int, total: int, category: str):
+        s = Score(player, score, correct, total, datetime.now().isoformat(), category or "all")
+        self.scores.append(s)
+        self.save_scores()
+
+    def get_leaderboard(self, limit: int = 10) -> List[Score]:
+        return sorted(self.scores, key=lambda x: x.score, reverse=True)[:limit]
+
+    def export_csv(self, filepath: str):
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Player", "Score", "Correct", "Total", "Date", "Category"])
+            for s in self.scores:
+                writer.writerow([s.player, s.score, s.correct, s.total, s.date, s.category])
+
+# ========== CLI ==========
+def cli():
+    parser = argparse.ArgumentParser(description="Викторина (Квиз)")
+    subparsers = parser.add_subparsers(dest="command", help="Команды")
+
+    # start
+    start_parser = subparsers.add_parser("start", help="Начать викторину")
+    start_parser.add_argument("--category", help="Категория")
+    start_parser.add_argument("--questions", type=int, default=10, help="Количество вопросов")
+    start_parser.add_argument("--timer", type=int, help="Таймер на вопрос (сек)")
+    start_parser.add_argument("--player", default="Player", help="Имя игрока")
+
+    # leaderboard
+    lb_parser = subparsers.add_parser("leaderboard", help="Таблица рекордов")
+    lb_parser.add_argument("--limit", type=int, default=10, help="Количество записей")
+
+    # categories
+    cat_parser = subparsers.add_parser("categories", help="Список категорий")
+
+    # export
+    exp_parser = subparsers.add_parser("export", help="Экспорт результатов")
+    exp_parser.add_argument("--output", "-o", required=True, help="Имя CSV файла")
+
+    # gui
+    parser.add_argument("--gui", action="store_true", help="Запустить GUI")
+    args = parser.parse_args()
+
+    if args.gui and GUI_AVAILABLE:
+        root = tk.Tk()
+        app = QuizForgeGUI(root)
+        root.mainloop()
+        return
+
+    forge = QuizForge()
+    if args.command == "start":
+        correct, total = forge.run_quiz(args.category, args.questions, args.timer)
+        score = correct * 10 + (total - correct) * 0  # простая система очков
+        print(f"\n💯 Ваш счёт: {score} очков")
+        if score > 0:
+            forge.add_score(args.player, score, correct, total, args.category or "all")
+            print("✅ Результат сохранён!")
+    elif args.command == "leaderboard":
+        scores = forge.get_leaderboard(args.limit)
+        if not scores:
+            print("Нет записей в таблице рекордов.")
+        else:
+            print("🏆 ТАБЛИЦА РЕКОРДОВ")
+            print(f"{'#':<3} {'Игрок':<12} {'Счёт':<6} {'Правильные':<12} {'Дата':<20} {'Категория'}")
+            for i, s in enumerate(scores, 1):
+                print(f"{i:<3} {s.player:<12} {s.score:<6} {s.correct}/{s.total:<12} {s.date[:16]:<20} {s.category}")
+    elif args.command == "categories":
+        cats = forge.get_categories()
+        if cats:
+            print("📚 Доступные категории:")
+            for c in cats:
+                count = len([q for q in forge.questions if q.category == c])
+                print(f"  {c} ({count} вопросов)")
+        else:
+            print("Нет категорий.")
+    elif args.command == "export":
+        forge.export_csv(args.output)
+        print(f"Экспортировано в {args.output}")
+    else:
+        interactive_mode(forge)
+
+def interactive_mode(forge):
+    while True:
+        print("\n📝 QuizForge - Викторина (интерактивный)")
+        print("1. Начать викторину")
+        print("2. Таблица рекордов")
+        print("3. Список категорий")
+        print("4. Экспорт результатов")
+        print("0. Выход")
+        choice = input("Выберите действие: ").strip()
+        if choice == "0":
+            break
+        elif choice == "1":
+            cats = forge.get_categories()
+            print("Доступные категории:", ", ".join(cats) if cats else "Нет категорий")
+            cat = input("Категория (Enter для всех): ").strip()
+            if cat and cat not in cats:
+                print("Категория не найдена, будут вопросы из всех категорий")
+                cat = None
+            try:
+                count = int(input("Количество вопросов (по умолчанию 10): ").strip() or "10")
+            except:
+                count = 10
+            timer = input("Таймер на вопрос (сек, Enter без таймера): ").strip()
+            timer = int(timer) if timer else None
+            player = input("Ваше имя (по умолчанию Player): ").strip() or "Player"
+            correct, total = forge.run_quiz(cat, count, timer)
+            score = correct * 10
+            print(f"\n💯 Ваш счёт: {score} очков")
+            if score > 0:
+                forge.add_score(player, score, correct, total, cat or "all")
+                print("✅ Результат сохранён!")
+        elif choice == "2":
+            scores = forge.get_leaderboard(10)
+            if not scores:
+                print("Нет записей в таблице рекордов.")
+            else:
+                print("🏆 ТАБЛИЦА РЕКОРДОВ")
+                print(f"{'#':<3} {'Игрок':<12} {'Счёт':<6} {'Правильные':<12} {'Дата':<20} {'Категория'}")
+                for i, s in enumerate(scores, 1):
+                    print(f"{i:<3} {s.player:<12} {s.score:<6} {s.correct}/{s.total:<12} {s.date[:16]:<20} {s.category}")
+        elif choice == "3":
+            cats = forge.get_categories()
+            if cats:
+                print("📚 Доступные категории:")
+                for c in cats:
+                    count = len([q for q in forge.questions if q.category == c])
+                    print(f"  {c} ({count} вопросов)")
+            else:
+                print("Нет категорий.")
+        elif choice == "4":
+            fname = input("Имя файла (CSV): ").strip()
+            if not fname:
+                fname = "scores.csv"
+            forge.export_csv(fname)
+            print(f"Экспортировано в {fname}")
+        else:
+            print("Неверный выбор")
+
+# ========== GUI ==========
+if GUI_AVAILABLE:
+    class QuizForgeGUI:
+        def __init__(self, root):
+            self.root = root
+            self.root.title("📝 QuizForge - Викторина")
+            self.root.geometry("700x600")
+            self.root.resizable(True, True)
+            self.forge = QuizForge()
+            self.current_question_idx = 0
+            self.questions = []
+            self.correct_count = 0
+            self.player_name = "Player"
+            self.create_widgets()
+            self.show_menu()
+
+        def create_widgets(self):
+            self.main_frame = ttk.Frame(self.root, padding="10")
+            self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Заголовок
+            self.title_label = ttk.Label(self.main_frame, text="📝 QuizForge", font=('Arial', 20, 'bold'))
+            self.title_label.pack(pady=10)
+
+            # Контейнер для динамического контента
+            self.content_frame = ttk.Frame(self.main_frame)
+            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+            # Статус
+            self.status_label = ttk.Label(self.main_frame, text="Добро пожаловать!", font=('Arial', 10))
+            self.status_label.pack(pady=5)
+
+        def clear_content(self):
+            for widget in self.content_frame.winfo_children():
+                widget.destroy()
+
+        def show_menu(self):
+            self.clear_content()
+            ttk.Label(self.content_frame, text="Выберите действие:", font=('Arial', 14)).pack(pady=10)
+            ttk.Button(self.content_frame, text="🎯 Начать викторину", command=self.show_settings).pack(pady=5, ipadx=20)
+            ttk.Button(self.content_frame, text="🏆 Таблица рекордов", command=self.show_leaderboard).pack(pady=5, ipadx=20)
+            ttk.Button(self.content_frame, text="📚 Список категорий", command=self.show_categories).pack(pady=5, ipadx=20)
+            ttk.Button(self.content_frame, text="💾 Экспорт CSV", command=self.export_csv).pack(pady=5, ipadx=20)
+
+        def show_settings(self):
+            self.clear_content()
+            ttk.Label(self.content_frame, text="Настройки викторины", font=('Arial', 14)).pack(pady=10)
+            ttk.Label(self.content_frame, text="Имя игрока:").pack(anchor=tk.W, pady=(10,0))
+            self.name_entry = ttk.Entry(self.content_frame)
+            self.name_entry.insert(0, "Player")
+            self.name_entry.pack(fill=tk.X, pady=5)
+
+            ttk.Label(self.content_frame, text="Категория:").pack(anchor=tk.W, pady=(10,0))
+            cats = [''] + self.forge.get_categories()
+            self.cat_var = tk.StringVar()
+            ttk.Combobox(self.content_frame, textvariable=self.cat_var, values=cats, state="readonly").pack(fill=tk.X, pady=5)
+
+            ttk.Label(self.content_frame, text="Количество вопросов:").pack(anchor=tk.W, pady=(10,0))
+            self.count_var = tk.IntVar(value=10)
+            ttk.Spinbox(self.content_frame, from_=1, to=50, textvariable=self.count_var).pack(fill=tk.X, pady=5)
+
+            ttk.Label(self.content_frame, text="Таймер (сек, 0 = без таймера):").pack(anchor=tk.W, pady=(10,0))
+            self.timer_var = tk.IntVar(value=0)
+            ttk.Spinbox(self.content_frame, from_=0, to=60, textvariable=self.timer_var).pack(fill=tk.X, pady=5)
+
+            ttk.Button(self.content_frame, text="▶️ Начать", command=self.start_quiz).pack(pady=20)
+
+        def start_quiz(self):
+            category = self.cat_var.get() or None
+            count = self.count_var.get()
+            timer = self.timer_var.get() or None
+            self.player_name = self.name_entry.get().strip() or "Player"
+            self.questions = self.forge.get_questions(category, count)
+            if not self.questions:
+                messagebox.showerror("Ошибка", "Нет вопросов в выбранной категории")
+                return
+            random.shuffle(self.questions)
+            self.current_question_idx = 0
+            self.correct_count = 0
+            self.start_time = time.time()
+            self.show_question()
+
+        def show_question(self):
+            self.clear_content()
+            if self.current_question_idx >= len(self.questions):
+                self.show_results()
+                return
+            q = self.questions[self.current_question_idx]
+            ttk.Label(self.content_frame,
+                      text=f"Вопрос {self.current_question_idx+1}/{len(self.questions)}",
+                      font=('Arial', 12)).pack(anchor=tk.W)
+            ttk.Label(self.content_frame, text=f"[{q.category}] {q.difficulty}", font=('Arial', 10)).pack(anchor=tk.W)
+            ttk.Label(self.content_frame, text=q.question, font=('Arial', 14), wraplength=600).pack(pady=10)
+            self.answer_var = tk.IntVar()
+            for i, opt in enumerate(q.options):
+                ttk.Radiobutton(self.content_frame, text=opt, variable=self.answer_var, value=i).pack(anchor=tk.W, pady=2)
+            ttk.Button(self.content_frame, text="✅ Ответить", command=self.check_answer).pack(pady=20)
+            self.status_label.config(text=f"Осталось: {len(self.questions)-self.current_question_idx-1}")
+
+        def check_answer(self):
+            ans = self.answer_var.get()
+            q = self.questions[self.current_question_idx]
+            if ans == q.correct:
+                self.correct_count += 1
+                self.status_label.config(text="✅ Правильно!")
+            else:
+                self.status_label.config(text=f"❌ Неправильно! Правильный ответ: {q.options[q.correct]}")
+            self.current_question_idx += 1
+            self.root.after(1500, self.show_question)
+
+        def show_results(self):
+            self.clear_content()
+            total = len(self.questions)
+            score = self.correct_count * 10
+            ttk.Label(self.content_frame, text="🎯 Результат!", font=('Arial', 18)).pack(pady=10)
+            ttk.Label(self.content_frame, text=f"Правильных ответов: {self.correct_count}/{total}",
+                      font=('Arial', 14)).pack(pady=5)
+            ttk.Label(self.content_frame, text=f"Счёт: {score} очков", font=('Arial', 14)).pack(pady=5)
+            if score > 0:
+                self.forge.add_score(self.player_name, score, self.correct_count, total,
+                                    self.cat_var.get() or "all")
+                ttk.Label(self.content_frame, text="✅ Результат сохранён!", font=('Arial', 12), foreground="green").pack(pady=5)
+            ttk.Button(self.content_frame, text="🏠 В меню", command=self.show_menu).pack(pady=20)
+
+        def show_leaderboard(self):
+            self.clear_content()
+            scores = self.forge.get_leaderboard(10)
+            if not scores:
+                ttk.Label(self.content_frame, text="Нет записей в таблице рекордов.").pack(pady=20)
+            else:
+                ttk.Label(self.content_frame, text="🏆 Таблица рекордов", font=('Arial', 16)).pack(pady=10)
+                text = scrolledtext.ScrolledText(self.content_frame, height=15, width=60)
+                text.pack(pady=10)
+                text.insert(tk.END, f"{'#':<3} {'Игрок':<12} {'Счёт':<6} {'Правильные':<12} {'Дата':<20} {'Категория'}\n")
+                text.insert(tk.END, "-"*70 + "\n")
+                for i, s in enumerate(scores, 1):
+                    text.insert(tk.END, f"{i:<3} {s.player:<12} {s.score:<6} {s.correct}/{s.total:<12} {s.date[:16]:<20} {s.category}\n")
+                text.config(state='disabled')
+            ttk.Button(self.content_frame, text="🏠 В меню", command=self.show_menu).pack(pady=10)
+
+        def show_categories(self):
+            self.clear_content()
+            cats = self.forge.get_categories()
+            if cats:
+                ttk.Label(self.content_frame, text="📚 Доступные категории:", font=('Arial', 14)).pack(pady=10)
+                for c in cats:
+                    count = len([q for q in self.forge.questions if q.category == c])
+                    ttk.Label(self.content_frame, text=f"  {c} ({count} вопросов)").pack(anchor=tk.W, pady=2)
+            else:
+                ttk.Label(self.content_frame, text="Нет категорий.").pack(pady=20)
+            ttk.Button(self.content_frame, text="🏠 В меню", command=self.show_menu).pack(pady=10)
+
+        def export_csv(self):
+            filepath = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+            if filepath:
+                self.forge.export_csv(filepath)
+                messagebox.showinfo("Экспорт", f"Экспортировано в {filepath}")
+
+if __name__ == "__main__":
+    cli()
